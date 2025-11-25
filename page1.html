@@ -1,0 +1,519 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { RefreshCw, Check, ArrowRight, HelpCircle, Calculator } from 'lucide-react';
+
+// --- Math Helpers ---
+
+// 最大公因數
+const gcd = (a: number, b: number): number => {
+  return b === 0 ? a : gcd(b, a % b);
+};
+
+// 最小公倍數
+const lcm = (a: number, b: number): number => {
+  return (a * b) / gcd(a, b);
+};
+
+// --- SVG Components ---
+
+interface PieProps {
+  numerator: number;
+  denominator: number;
+  color: string;
+  overlayDenominator?: number; // 用於顯示通分後的切割線
+  highlight?: boolean;
+}
+
+const FractionPie: React.FC<PieProps> = ({ 
+  numerator, 
+  denominator, 
+  color, 
+  overlayDenominator,
+  highlight = false
+}) => {
+  const radius = 45;
+  const center = 50;
+  
+  // 計算圓餅圖的路徑
+  const getSlicePath = (index: number, total: number, r: number) => {
+    const startAngle = (index * 360) / total;
+    const endAngle = ((index + 1) * 360) / total;
+    
+    // 轉換為弧度，減去 90 度以從頂部開始
+    const startRad = (startAngle - 90) * (Math.PI / 180);
+    const endRad = (endAngle - 90) * (Math.PI / 180);
+    
+    const x1 = center + r * Math.cos(startRad);
+    const y1 = center + r * Math.sin(startRad);
+    const x2 = center + r * Math.cos(endRad);
+    const y2 = center + r * Math.sin(endRad);
+    
+    const largeArcFlag = endAngle - startAngle <= 180 ? 0 : 1;
+    
+    return `M ${center} ${center} L ${x1} ${y1} A ${r} ${r} 0 ${largeArcFlag} 1 ${x2} ${y2} Z`;
+  };
+
+  // 繪製基礎分數塊 (填充色)
+  const slices = [];
+  for (let i = 0; i < numerator; i++) {
+    slices.push(
+      <path
+        key={`slice-${i}`}
+        d={getSlicePath(i, denominator, radius)}
+        fill={color}
+        stroke="white"
+        strokeWidth="1"
+        className="transition-all duration-500 ease-in-out"
+      />
+    );
+  }
+
+  // 繪製背景網格 (剩餘部分)
+  const bgSlices = [];
+  for (let i = numerator; i < denominator; i++) {
+    bgSlices.push(
+      <path
+        key={`bg-slice-${i}`}
+        d={getSlicePath(i, denominator, radius)}
+        fill="#f3f4f6" // gray-100
+        stroke="#e5e7eb" // gray-200
+        strokeWidth="1"
+      />
+    );
+  }
+
+  // 繪製通分後的疊加線 (Overlay)
+  const overlayLines = [];
+  if (overlayDenominator && overlayDenominator > denominator) {
+    for (let i = 0; i < overlayDenominator; i++) {
+      const angle = (i * 360) / overlayDenominator;
+      const rad = (angle - 90) * (Math.PI / 180);
+      const x2 = center + radius * Math.cos(rad);
+      const y2 = center + radius * Math.sin(rad);
+      
+      overlayLines.push(
+        <line
+          key={`overlay-${i}`}
+          x1={center}
+          y1={center}
+          x2={x2}
+          y2={y2}
+          stroke="rgba(0,0,0,0.3)"
+          strokeWidth="0.5"
+          strokeDasharray="2,2"
+        />
+      );
+    }
+  }
+
+  return (
+    <div className={`relative w-32 h-32 ${highlight ? 'scale-110' : ''} transition-transform duration-300`}>
+      <svg viewBox="0 0 100 100" className="w-full h-full drop-shadow-md">
+        <circle cx="50" cy="50" r="48" fill="white" stroke="#d1d5db" strokeWidth="1" />
+        {bgSlices}
+        {slices}
+        {overlayLines}
+        {/* 外圈邊框 */}
+        <circle cx="50" cy="50" r="45" fill="none" stroke="#374151" strokeWidth="2" />
+      </svg>
+    </div>
+  );
+};
+
+// --- Main App Component ---
+
+export default function App() {
+  // Game State
+  const [level, setLevel] = useState<'easy' | 'hard'>('easy');
+  const [n1, setN1] = useState(1);
+  const [d1, setD1] = useState(2);
+  const [n2, setN2] = useState(1);
+  const [d2, setD2] = useState(3);
+  const [operation, setOperation] = useState<'+' | '-'>('+');
+  
+  // User Input State
+  const [step, setStep] = useState<1 | 2 | 3>(1); // 1: 通分, 2: 擴分, 3: 計算
+  const [inputCommonDenom, setInputCommonDenom] = useState('');
+  const [inputNewN1, setInputNewN1] = useState('');
+  const [inputNewN2, setInputNewN2] = useState('');
+  const [inputFinalNum, setInputFinalNum] = useState('');
+  const [inputFinalDenom, setInputFinalDenom] = useState('');
+  
+  const [message, setMessage] = useState('');
+  const [messageType, setMessageType] = useState<'info' | 'success' | 'error'>('info');
+
+  // Generate new problem
+  const generateProblem = () => {
+    let newD1, newD2, newN1, newN2;
+
+    if (level === 'easy') {
+      // 分母較小 (2, 3, 4, 5, 6)
+      const denoms = [2, 3, 4, 5, 6];
+      newD1 = denoms[Math.floor(Math.random() * denoms.length)];
+      // 確保 D2 不等於 D1
+      do {
+        newD2 = denoms[Math.floor(Math.random() * denoms.length)];
+      } while (newD1 === newD2);
+    } else {
+      // 分母較大 (2-10)
+      newD1 = Math.floor(Math.random() * 8) + 2;
+      do {
+        newD2 = Math.floor(Math.random() * 8) + 2;
+      } while (newD1 === newD2);
+    }
+
+    // 分子隨機，確保真分數
+    newN1 = Math.floor(Math.random() * (newD1 - 1)) + 1;
+    newN2 = Math.floor(Math.random() * (newD2 - 1)) + 1;
+
+    // 如果是減法，確保左邊大於右邊
+    let op: '+' | '-' = Math.random() > 0.5 ? '+' : '-';
+    if (op === '-' && (newN1/newD1 < newN2/newD2)) {
+       // 交換
+       [newN1, newN2] = [newN2, newN1];
+       [newD1, newD2] = [newD2, newD1];
+    }
+
+    setN1(newN1); setD1(newD1);
+    setN2(newN2); setD2(newD2);
+    setOperation(op);
+    
+    // Reset inputs
+    setStep(1);
+    setInputCommonDenom('');
+    setInputNewN1('');
+    setInputNewN2('');
+    setInputFinalNum('');
+    setInputFinalDenom('');
+    setMessage('請先找出兩個分數的公分母 (通分)');
+    setMessageType('info');
+  };
+
+  useEffect(() => {
+    generateProblem();
+  }, [level]);
+
+  // Derived correct answers
+  const correctLCM = lcm(d1, d2);
+  const correctNewN1 = n1 * (correctLCM / d1);
+  const correctNewN2 = n2 * (correctLCM / d2);
+  const rawResultNum = operation === '+' ? correctNewN1 + correctNewN2 : correctNewN1 - correctNewN2;
+  
+  // Handlers
+  const checkCommonDenom = () => {
+    const val = parseInt(inputCommonDenom);
+    if (isNaN(val)) return;
+
+    if (val === correctLCM) {
+      setStep(2);
+      setMessage('太棒了！現在請填寫新的分子 (擴分)');
+      setMessageType('success');
+    } else if (val % d1 === 0 && val % d2 === 0) {
+      setStep(2); // 接受公倍數，雖然不是最小的，但在教學上也是對的邏輯
+      setMessage('這是公倍數沒錯！(建議找最小公倍數會更好算喔)');
+      setMessageType('success');
+    } else {
+      setMessage(`哎呀，${val} 不是 ${d1} 和 ${d2} 的公倍數喔。試試看 ${correctLCM}？`);
+      setMessageType('error');
+    }
+  };
+
+  const checkNumerators = () => {
+    const v1 = parseInt(inputNewN1);
+    const v2 = parseInt(inputNewN2);
+    const currentCD = parseInt(inputCommonDenom); // 使用用戶輸入的公分母
+
+    const targetN1 = n1 * (currentCD / d1);
+    const targetN2 = n2 * (currentCD / d2);
+
+    if (v1 === targetN1 && v2 === targetN2) {
+      setStep(3);
+      setMessage(`擴分正確！最後一步：${operation === '+' ? '相加' : '相減'}並填寫答案。`);
+      setMessageType('success');
+    } else {
+      setMessage('分子好像算錯囉？看看圓餅圖的切分。');
+      setMessageType('error');
+    }
+  };
+
+  const checkFinalAnswer = () => {
+    const fn = parseInt(inputFinalNum);
+    const fd = parseInt(inputFinalDenom);
+    const currentCD = parseInt(inputCommonDenom);
+    
+    const targetN1 = n1 * (currentCD / d1);
+    const targetN2 = n2 * (currentCD / d2);
+    const targetResultNum = operation === '+' ? targetN1 + targetN2 : targetN1 - targetN2;
+
+    // 檢查數值是否相等 (允許未約分)
+    if (fn * currentCD === fd * targetResultNum) {
+      setMessage('恭喜你！答案正確！🎉');
+      setMessageType('success');
+    } else {
+      setMessage('再算一次看看喔！分母不變，分子相加減。');
+      setMessageType('error');
+    }
+  };
+
+  // Helper for input styles
+  const inputClass = "w-16 h-12 text-center text-xl font-bold border-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400";
+  const getBorderColor = (isError: boolean) => isError ? 'border-red-400 bg-red-50' : 'border-gray-300';
+
+  return (
+    <div className="min-h-screen bg-sky-50 flex flex-col items-center py-8 font-sans">
+      
+      {/* Header */}
+      <header className="mb-8 text-center">
+        <h1 className="text-3xl md:text-4xl font-extrabold text-blue-700 mb-2 drop-shadow-sm">
+          異分母分數大挑戰
+        </h1>
+        <p className="text-gray-600">透過圖形互動，輕鬆學會分數加減！</p>
+      </header>
+
+      {/* Control Panel */}
+      <div className="bg-white p-4 rounded-xl shadow-lg mb-8 flex flex-wrap gap-4 items-center justify-center w-11/12 max-w-4xl">
+        <div className="flex items-center gap-2">
+          <span className="font-bold text-gray-700">難度：</span>
+          <div className="flex bg-gray-100 p-1 rounded-lg">
+            <button
+              onClick={() => setLevel('easy')}
+              className={`px-4 py-1 rounded-md text-sm font-medium transition-colors ${level === 'easy' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+            >
+              簡單
+            </button>
+            <button
+              onClick={() => setLevel('hard')}
+              className={`px-4 py-1 rounded-md text-sm font-medium transition-colors ${level === 'hard' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+            >
+              進階
+            </button>
+          </div>
+        </div>
+        
+        <button 
+          onClick={generateProblem}
+          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg font-bold transition-transform active:scale-95 shadow-md"
+        >
+          <RefreshCw size={18} />
+          新題目
+        </button>
+      </div>
+
+      {/* Main Game Area */}
+      <div className="bg-white p-6 md:p-10 rounded-2xl shadow-xl w-11/12 max-w-5xl flex flex-col gap-8">
+        
+        {/* Step Indicator */}
+        <div className="flex justify-between items-center mb-4 relative">
+          <div className="absolute top-1/2 left-0 w-full h-1 bg-gray-200 -z-0"></div>
+          {[
+            { s: 1, label: '通分' }, 
+            { s: 2, label: '擴分' }, 
+            { s: 3, label: '計算' }
+          ].map((item) => (
+            <div key={item.s} className={`relative z-10 flex flex-col items-center gap-1 ${step >= item.s ? 'text-blue-600' : 'text-gray-400'}`}>
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-lg border-4 transition-colors ${step >= item.s ? 'bg-blue-600 text-white border-blue-100' : 'bg-gray-100 border-white'}`}>
+                {item.s}
+              </div>
+              <span className="text-xs font-bold">{item.label}</span>
+            </div>
+          ))}
+        </div>
+
+        {/* Message Box */}
+        <div className={`text-center p-3 rounded-lg font-bold text-lg transition-colors
+          ${messageType === 'info' ? 'bg-blue-50 text-blue-800' : ''}
+          ${messageType === 'success' ? 'bg-green-100 text-green-800' : ''}
+          ${messageType === 'error' ? 'bg-red-100 text-red-800' : ''}
+        `}>
+          {message}
+        </div>
+
+        {/* Visual & Math Area */}
+        <div className="flex flex-col md:flex-row items-center justify-center gap-4 md:gap-8 flex-wrap">
+          
+          {/* Fraction 1 */}
+          <div className="flex flex-col items-center gap-4 p-4 bg-yellow-50 rounded-xl border border-yellow-100 shadow-sm min-w-[140px]">
+            <FractionPie 
+              numerator={n1} 
+              denominator={d1} 
+              color="#fbbf24" // amber-400
+              overlayDenominator={step >= 2 ? parseInt(inputCommonDenom) || correctLCM : undefined}
+            />
+            
+            {/* Math Expression 1 */}
+            <div className="flex items-center gap-2">
+              <div className="flex flex-col items-center text-2xl font-bold text-gray-700">
+                <span>{n1}</span>
+                <span className="w-8 h-1 bg-gray-700 rounded-full my-1"></span>
+                <span>{d1}</span>
+              </div>
+              
+              {/* Conversion Arrow & Input */}
+              {step >= 2 && (
+                <>
+                  <ArrowRight size={20} className="text-gray-400" />
+                  <div className="flex flex-col items-center">
+                    <input 
+                      type="number" 
+                      value={inputNewN1}
+                      onChange={(e) => setInputNewN1(e.target.value)}
+                      disabled={step > 2}
+                      className={`${inputClass} ${step === 2 ? 'bg-white border-blue-400' : 'bg-gray-50 border-gray-200'}`}
+                      placeholder="?"
+                    />
+                    <span className="w-12 h-1 bg-gray-700 rounded-full my-1"></span>
+                    <span className="text-2xl font-bold text-blue-600">{inputCommonDenom}</span>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Operation */}
+          <div className="text-4xl font-black text-gray-400 bg-gray-100 w-12 h-12 rounded-full flex items-center justify-center">
+            {operation}
+          </div>
+
+          {/* Fraction 2 */}
+          <div className="flex flex-col items-center gap-4 p-4 bg-emerald-50 rounded-xl border border-emerald-100 shadow-sm min-w-[140px]">
+            <FractionPie 
+              numerator={n2} 
+              denominator={d2} 
+              color="#34d399" // emerald-400
+              overlayDenominator={step >= 2 ? parseInt(inputCommonDenom) || correctLCM : undefined}
+            />
+            
+            <div className="flex items-center gap-2">
+              <div className="flex flex-col items-center text-2xl font-bold text-gray-700">
+                <span>{n2}</span>
+                <span className="w-8 h-1 bg-gray-700 rounded-full my-1"></span>
+                <span>{d2}</span>
+              </div>
+
+              {step >= 2 && (
+                <>
+                  <ArrowRight size={20} className="text-gray-400" />
+                  <div className="flex flex-col items-center">
+                    <input 
+                      type="number" 
+                      value={inputNewN2}
+                      onChange={(e) => setInputNewN2(e.target.value)}
+                      disabled={step > 2}
+                      className={`${inputClass} ${step === 2 ? 'bg-white border-blue-400' : 'bg-gray-50 border-gray-200'}`}
+                      placeholder="?"
+                    />
+                    <span className="w-12 h-1 bg-gray-700 rounded-full my-1"></span>
+                    <span className="text-2xl font-bold text-blue-600">{inputCommonDenom}</span>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Equals */}
+          <div className="text-4xl font-black text-gray-400">
+            =
+          </div>
+
+          {/* Step 1: Input Common Denom */}
+          {step === 1 && (
+             <div className="flex flex-col items-center gap-2 animate-bounce-subtle">
+                <label className="text-sm font-bold text-blue-600 mb-1">新的公分母?</label>
+                <div className="flex flex-col items-center bg-blue-50 p-4 rounded-xl border-2 border-dashed border-blue-300">
+                   <div className="w-16 h-8 bg-gray-200 rounded animate-pulse mb-2"></div>
+                   <span className="w-16 h-1 bg-gray-400 rounded-full mb-2"></span>
+                   <input 
+                      type="number"
+                      value={inputCommonDenom}
+                      onChange={(e) => setInputCommonDenom(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && checkCommonDenom()}
+                      className={`${inputClass} border-blue-500`}
+                      placeholder="?"
+                      autoFocus
+                   />
+                </div>
+                <button 
+                  onClick={checkCommonDenom}
+                  className="mt-2 bg-blue-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-blue-700 shadow-md flex items-center gap-1"
+                >
+                  <Check size={16} /> 確定
+                </button>
+             </div>
+          )}
+
+          {/* Step 3: Result */}
+          {step === 3 && (
+            <div className="flex flex-col items-center p-4 bg-purple-50 rounded-xl border border-purple-100 shadow-sm animate-fade-in">
+              <div className="text-sm font-bold text-purple-600 mb-2">最終答案</div>
+              <div className="flex flex-col items-center">
+                <input 
+                  type="number"
+                  value={inputFinalNum}
+                  onChange={(e) => setInputFinalNum(e.target.value)}
+                  className={`${inputClass} border-purple-400`}
+                  placeholder="?"
+                  autoFocus
+                />
+                <span className="w-20 h-1 bg-gray-700 rounded-full my-2"></span>
+                <input 
+                  type="number"
+                  value={inputFinalDenom}
+                  onChange={(e) => setInputFinalDenom(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && checkFinalAnswer()}
+                  className={`${inputClass} border-purple-400`}
+                  placeholder="?"
+                />
+              </div>
+              <button 
+                  onClick={checkFinalAnswer}
+                  className="mt-4 bg-purple-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-purple-700 shadow-md flex items-center gap-1"
+                >
+                  <Calculator size={18} /> 檢查
+                </button>
+            </div>
+          )}
+
+        </div>
+
+        {/* Action Button for Step 2 */}
+        {step === 2 && (
+          <div className="flex justify-center mt-4">
+             <button 
+                onClick={checkNumerators}
+                className="bg-green-600 text-white px-8 py-3 rounded-xl font-bold text-lg hover:bg-green-700 shadow-lg flex items-center gap-2 transform transition hover:scale-105"
+              >
+                檢查擴分 <Check size={20} />
+              </button>
+          </div>
+        )}
+
+      </div>
+
+      {/* Footer / Hint */}
+      <div className="mt-8 text-gray-500 text-sm max-w-lg text-center px-4">
+        <p className="flex items-center justify-center gap-2 mb-2">
+          <HelpCircle size={16} /> 小提示：
+        </p>
+        {step === 1 && <p>想一想 {d1} 和 {d2} 的乘法表，哪個數字同時出現了？(最小公倍數)</p>}
+        {step === 2 && <p>分母變大了幾倍，分子也要變大幾倍喔！</p>}
+        {step === 3 && <p>現在分母都一樣是 {inputCommonDenom} 了，只要把分子 {operation === '+' ? '加起來' : '相減'} 就好囉。</p>}
+      </div>
+
+      <style>{`
+        .animate-bounce-subtle {
+          animation: bounce-subtle 2s infinite;
+        }
+        @keyframes bounce-subtle {
+          0%, 100% { transform: translateY(-5%); }
+          50% { transform: translateY(0); }
+        }
+        .animate-fade-in {
+          animation: fadeIn 0.5s ease-out forwards;
+        }
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(10px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
+    </div>
+  );
+}
